@@ -23,14 +23,24 @@ interface Fertilizer {
   createdAt: string;
 }
 
+// 养护记录类型定义
+interface CareLog {
+  id: string;
+  plantId: string;
+  plantName: string;
+  action: string;
+  createdAt: string;
+}
+
 export default function Home() {
   // 状态管理
   const [plants, setPlants] = useState<Plant[]>([]);
   const [fertilizers, setFertilizers] = useState<Fertilizer[]>([]);
+  const [careLogs, setCareLogs] = useState<CareLog[]>([]);
   const [showAddPlant, setShowAddPlant] = useState(false);
   const [showAddFertilizer, setShowAddFertilizer] = useState(false);
   const [currentPage, setCurrentPage] = useState<
-    "home" | "fertilizer" | "settings"
+    "home" | "fertilizer" | "history" | "settings"
   >("home");
   const [loading, setLoading] = useState(true);
 
@@ -83,15 +93,53 @@ export default function Home() {
     }
   }, []);
 
+  // 从 API 加载养护记录
+  const loadCareLogs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/logs");
+      if (res.ok) {
+        const data = await res.json();
+        setCareLogs(data);
+      }
+    } catch (error) {
+      console.error("加载养护记录失败:", error);
+    }
+  }, []);
+
+  // 添加养护记录
+  const addCareLog = async (
+    plantId: string,
+    plantName: string,
+    action: string,
+  ) => {
+    try {
+      const log = {
+        id: Date.now().toString(),
+        plantId,
+        plantName,
+        action,
+        createdAt: new Date().toISOString(),
+      };
+      await fetch("/api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(log),
+      });
+      setCareLogs([log, ...careLogs]);
+    } catch (error) {
+      console.error("记录养护失败:", error);
+    }
+  };
+
   // 初始化加载数据
   useEffect(() => {
     const init = async () => {
       setLoading(true);
-      await Promise.all([loadPlants(), loadFertilizers()]);
+      await Promise.all([loadPlants(), loadFertilizers(), loadCareLogs()]);
       setLoading(false);
     };
     init();
-  }, [loadPlants, loadFertilizers]);
+  }, [loadPlants, loadFertilizers, loadCareLogs]);
 
   // 计算是否需要浇水
   const needsWatering = (plant: Plant) => {
@@ -265,6 +313,8 @@ export default function Home() {
         );
         if (plant) {
           showSuccess(`💧 ${plant.name} 喝饱了，状态很好！`);
+          // 记录养护历史
+          addCareLog(plantId, plant.name, "浇水");
         }
       }
     } catch (error) {
@@ -292,6 +342,8 @@ export default function Home() {
         );
         if (plant) {
           showSuccess(`🌿 ${plant.name} 吃饱了，正在努力生长！`);
+          // 记录养护历史
+          addCareLog(plantId, plant.name, "施肥");
         }
       }
     } catch (error) {
@@ -321,7 +373,7 @@ export default function Home() {
   const exportData = () => {
     const data = {
       exportDate: new Date().toISOString().split("T")[0],
-      version: "1.0",
+      version: "2.0",
       data: {
         plants,
         fertilizers,
@@ -336,6 +388,62 @@ export default function Home() {
     a.href = url;
     a.download = `plant-care-backup-${data.exportDate}.json`;
     a.click();
+    showSuccess("📦 数据已导出，请妥善保管备份文件！");
+  };
+
+  // 导入数据
+  const importData = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+
+      if (!backup.data || !backup.data.plants) {
+        alert("备份文件格式不正确");
+        return;
+      }
+
+      if (
+        !confirm(
+          `确定要导入备份吗？\n\n备份日期：${backup.exportDate}\n植物数量：${backup.data.plants.length}\n肥料数量：${backup.data.fertilizers?.length || 0}\n\n注意：这将覆盖当前所有数据！`,
+        )
+      ) {
+        return;
+      }
+
+      // 导入植物
+      for (const plant of backup.data.plants) {
+        await fetch("/api/plants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(plant),
+        });
+      }
+
+      // 导入肥料
+      if (backup.data.fertilizers) {
+        for (const fertilizer of backup.data.fertilizers) {
+          await fetch("/api/fertilizers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fertilizer),
+          });
+        }
+      }
+
+      // 重新加载数据
+      await loadPlants();
+      await loadFertilizers();
+      showSuccess("📥 数据导入成功！欢迎回来～");
+
+      // 清空 input
+      event.target.value = "";
+    } catch (error) {
+      console.error("导入失败:", error);
+      alert("导入失败，请检查备份文件格式");
+    }
   };
 
   // 需要浇水的植物
@@ -368,22 +476,28 @@ export default function Home() {
       <header className="bg-green-600 text-white p-4 shadow-md">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <h1 className="text-xl font-bold">🌱 植物养护助手</h1>
-          <nav className="flex gap-4">
+          <nav className="flex gap-2 text-sm">
             <button
               onClick={() => setCurrentPage("home")}
-              className={`px-3 py-1 rounded ${currentPage === "home" ? "bg-green-700" : "hover:bg-green-500"}`}
+              className={`px-2 py-1 rounded ${currentPage === "home" ? "bg-green-700" : "hover:bg-green-500"}`}
             >
               首页
             </button>
             <button
+              onClick={() => setCurrentPage("history")}
+              className={`px-2 py-1 rounded ${currentPage === "history" ? "bg-green-700" : "hover:bg-green-500"}`}
+            >
+              历史
+            </button>
+            <button
               onClick={() => setCurrentPage("fertilizer")}
-              className={`px-3 py-1 rounded ${currentPage === "fertilizer" ? "bg-green-700" : "hover:bg-green-500"}`}
+              className={`px-2 py-1 rounded ${currentPage === "fertilizer" ? "bg-green-700" : "hover:bg-green-500"}`}
             >
               肥料
             </button>
             <button
               onClick={() => setCurrentPage("settings")}
-              className={`px-3 py-1 rounded ${currentPage === "settings" ? "bg-green-700" : "hover:bg-green-500"}`}
+              className={`px-2 py-1 rounded ${currentPage === "settings" ? "bg-green-700" : "hover:bg-green-500"}`}
             >
               设置
             </button>
@@ -569,21 +683,79 @@ export default function Home() {
           </>
         )}
 
+        {/* 养护历史页 */}
+        {currentPage === "history" && (
+          <>
+            <h2 className="text-lg font-bold mb-4">📖 养护历史</h2>
+
+            {careLogs.length === 0 ? (
+              <div className="text-center py-12 bg-white rounded-lg shadow">
+                <p className="text-4xl mb-4">📝</p>
+                <p className="text-gray-700 font-bold mb-2">还没有养护记录</p>
+                <p className="text-gray-500">
+                  给植物浇水或施肥后，这里会显示你的养护足迹
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* 统计信息 */}
+                <div className="bg-green-100 border border-green-300 rounded-lg p-4 mb-4 text-center">
+                  <p className="text-green-700 font-bold">
+                    🏆 你已经照顾植物 {careLogs.length} 次了，继续加油！
+                  </p>
+                </div>
+
+                {/* 历史记录列表 */}
+                <div className="bg-white rounded-lg shadow">
+                  {careLogs.map((log, index) => (
+                    <div
+                      key={log.id}
+                      className={`p-4 flex items-center gap-3 ${index !== careLogs.length - 1 ? "border-b" : ""}`}
+                    >
+                      <span className="text-2xl">
+                        {log.action === "浇水" ? "💧" : "🌿"}
+                      </span>
+                      <div className="flex-1">
+                        <p className="font-bold">{log.plantName}</p>
+                        <p className="text-sm text-gray-500">
+                          {log.action} ·{" "}
+                          {new Date(log.createdAt).toLocaleString("zh-CN")}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
         {/* 设置页 */}
         {currentPage === "settings" && (
           <>
             <h2 className="text-lg font-bold mb-4">设置</h2>
 
             <div className="bg-white rounded-lg shadow p-4 mb-4">
-              <h3 className="font-bold mb-2">数据管理</h3>
-              <button
-                onClick={exportData}
-                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-              >
-                📦 导出数据
-              </button>
-              <p className="text-sm text-gray-500 mt-2">
-                备份所有植物和肥料数据到 JSON 文件
+              <h3 className="font-bold mb-3">数据管理</h3>
+              <div className="flex gap-3 flex-wrap">
+                <button
+                  onClick={exportData}
+                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                >
+                  📦 导出数据
+                </button>
+                <label className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 cursor-pointer">
+                  📥 导入数据
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={importData}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+              <p className="text-sm text-gray-500 mt-3">
+                💡 定期导出备份，换设备时可以导入恢复
               </p>
             </div>
 

@@ -33,5 +33,16 @@ export async function initDatabase() {
     )
   `);
 
+  // 创建养护记录表
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS care_logs (
+      id TEXT PRIMARY KEY,
+      plant_id TEXT NOT NULL,
+      plant_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+
   console.log("数据库初始化完成");
 }
