@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 // 植物类型定义
 interface Plant {
@@ -32,6 +32,7 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState<
     "home" | "fertilizer" | "settings"
   >("home");
+  const [loading, setLoading] = useState(true);
 
   // 新植物表单
   const [newPlant, setNewPlant] = useState({
@@ -56,28 +57,41 @@ export default function Home() {
     setTimeout(() => setSuccessMessage(null), 2000);
   };
 
-  // 从 localStorage 加载数据
-  useEffect(() => {
-    const savedPlants = localStorage.getItem("plant-care-plants");
-    const savedFertilizers = localStorage.getItem("plant-care-fertilizers");
-
-    if (savedPlants) {
-      setPlants(JSON.parse(savedPlants));
-    }
-    if (savedFertilizers) {
-      setFertilizers(JSON.parse(savedFertilizers));
+  // 从 API 加载植物数据
+  const loadPlants = useCallback(async () => {
+    try {
+      const res = await fetch("/api/plants");
+      if (res.ok) {
+        const data = await res.json();
+        setPlants(data);
+      }
+    } catch (error) {
+      console.error("加载植物失败:", error);
     }
   }, []);
 
-  // 保存植物数据到 localStorage
-  useEffect(() => {
-    localStorage.setItem("plant-care-plants", JSON.stringify(plants));
-  }, [plants]);
+  // 从 API 加载肥料数据
+  const loadFertilizers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/fertilizers");
+      if (res.ok) {
+        const data = await res.json();
+        setFertilizers(data);
+      }
+    } catch (error) {
+      console.error("加载肥料失败:", error);
+    }
+  }, []);
 
-  // 保存肥料数据到 localStorage
+  // 初始化加载数据
   useEffect(() => {
-    localStorage.setItem("plant-care-fertilizers", JSON.stringify(fertilizers));
-  }, [fertilizers]);
+    const init = async () => {
+      setLoading(true);
+      await Promise.all([loadPlants(), loadFertilizers()]);
+      setLoading(false);
+    };
+    init();
+  }, [loadPlants, loadFertilizers]);
 
   // 计算是否需要浇水
   const needsWatering = (plant: Plant) => {
@@ -162,7 +176,7 @@ export default function Home() {
   };
 
   // 添加植物
-  const addPlant = () => {
+  const addPlant = async () => {
     if (!newPlant.name) return;
 
     const today = new Date().toISOString().split("T")[0];
@@ -178,18 +192,31 @@ export default function Home() {
       createdAt: today,
     };
 
-    setPlants([...plants, plant]);
-    setNewPlant({
-      name: "",
-      type: "中间型",
-      waterCycle: 7,
-      fertilizerCycle: 14,
-    });
-    setShowAddPlant(false);
+    try {
+      const res = await fetch("/api/plants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(plant),
+      });
+
+      if (res.ok) {
+        setPlants([...plants, plant]);
+        setNewPlant({
+          name: "",
+          type: "中间型",
+          waterCycle: 7,
+          fertilizerCycle: 14,
+        });
+        setShowAddPlant(false);
+        showSuccess(`🌱 ${plant.name} 加入了植物大家庭！`);
+      }
+    } catch (error) {
+      console.error("添加植物失败:", error);
+    }
   };
 
   // 添加肥料
-  const addFertilizer = () => {
+  const addFertilizer = async () => {
     if (!newFertilizer.name) return;
 
     const today = new Date().toISOString().split("T")[0];
@@ -200,41 +227,93 @@ export default function Home() {
       createdAt: today,
     };
 
-    setFertilizers([...fertilizers, fertilizer]);
-    setNewFertilizer({ name: "", type: "通用" });
-    setShowAddFertilizer(false);
+    try {
+      const res = await fetch("/api/fertilizers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fertilizer),
+      });
+
+      if (res.ok) {
+        setFertilizers([...fertilizers, fertilizer]);
+        setNewFertilizer({ name: "", type: "通用" });
+        setShowAddFertilizer(false);
+        showSuccess(`🧴 ${fertilizer.name} 已添加到肥料库！`);
+      }
+    } catch (error) {
+      console.error("添加肥料失败:", error);
+    }
   };
 
   // 一键浇水
-  const waterPlant = (plantId: string) => {
+  const waterPlant = async (plantId: string) => {
     const plant = plants.find((p) => p.id === plantId);
     const today = new Date().toISOString().split("T")[0];
-    setPlants(
-      plants.map((p) => (p.id === plantId ? { ...p, lastWatered: today } : p)),
-    );
-    if (plant) {
-      showSuccess(`💧 ${plant.name} 喝饱了，状态很好！`);
+
+    try {
+      const res = await fetch("/api/plants", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: plantId, lastWatered: today }),
+      });
+
+      if (res.ok) {
+        setPlants(
+          plants.map((p) =>
+            p.id === plantId ? { ...p, lastWatered: today } : p,
+          ),
+        );
+        if (plant) {
+          showSuccess(`💧 ${plant.name} 喝饱了，状态很好！`);
+        }
+      }
+    } catch (error) {
+      console.error("浇水失败:", error);
     }
   };
 
   // 一键施肥
-  const fertilizePlant = (plantId: string) => {
+  const fertilizePlant = async (plantId: string) => {
     const plant = plants.find((p) => p.id === plantId);
     const today = new Date().toISOString().split("T")[0];
-    setPlants(
-      plants.map((p) =>
-        p.id === plantId ? { ...p, lastFertilized: today } : p,
-      ),
-    );
-    if (plant) {
-      showSuccess(`🌿 ${plant.name} 吃饱了，正在努力生长！`);
+
+    try {
+      const res = await fetch("/api/plants", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: plantId, lastFertilized: today }),
+      });
+
+      if (res.ok) {
+        setPlants(
+          plants.map((p) =>
+            p.id === plantId ? { ...p, lastFertilized: today } : p,
+          ),
+        );
+        if (plant) {
+          showSuccess(`🌿 ${plant.name} 吃饱了，正在努力生长！`);
+        }
+      }
+    } catch (error) {
+      console.error("施肥失败:", error);
     }
   };
 
   // 删除植物
-  const deletePlant = (plantId: string) => {
+  const deletePlant = async (plantId: string) => {
     if (confirm("确定要删除这个植物吗？")) {
-      setPlants(plants.filter((p) => p.id !== plantId));
+      try {
+        const res = await fetch(`/api/plants?id=${plantId}`, {
+          method: "DELETE",
+        });
+
+        if (res.ok) {
+          setPlants(plants.filter((p) => p.id !== plantId));
+          showSuccess("植物已删除");
+        }
+      } catch (error) {
+        console.error("删除植物失败:", error);
+      }
     }
   };
 
@@ -263,6 +342,18 @@ export default function Home() {
   const plantsNeedingWater = plants.filter(needsWatering);
   // 需要施肥的植物
   const plantsNeedingFertilizer = plants.filter(needsFertilizing);
+
+  // 加载中状态
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-4xl mb-4">🌱</p>
+          <p className="text-gray-600">加载中...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -498,8 +589,9 @@ export default function Home() {
 
             <div className="bg-white rounded-lg shadow p-4">
               <h3 className="font-bold mb-2">关于</h3>
-              <p className="text-sm text-gray-600">版本：1.0</p>
+              <p className="text-sm text-gray-600">版本：2.0（云端存储版）</p>
               <p className="text-sm text-gray-600">作者：caoyue</p>
+              <p className="text-sm text-gray-600">数据库：Turso (SQLite)</p>
             </div>
           </>
         )}
